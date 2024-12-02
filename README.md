@@ -1,1 +1,26 @@
 # ViT-SpotEmbeddings
+
+An image processing pipeline leveraging Vision Transformers (ViT) to extract feature embeddings from high-resolution tissue slide images. This project facilitates spatial clustering, dimensionality reduction, and visualization for downstream analysis, providing meaningful insights in biomedical imaging.
+
+## Features
+- **Data Preprocessing**:
+  - Scales and crops spot coordinates to prepare structured inputs.
+- **Feature Extraction**:
+  - Utilizes pretrained Vision Transformers to generate feature embeddings.
+- **Clustering**:
+  - Applies unsupervised K-Means clustering and PCA to uncover spatial patterns.
+- **Visualization**:
+  - Visualizes clustering results and embeddings in 2D space for interpretability.
+
+## Use Cases
+- Biomedical image analysis.
+- Spatial pattern discovery in tissue slides.
+- Unsupervised learning for high-resolution image data.
+
+## Technologies
+- Vision Transformers (ViT)
+- PyTorch
+- scikit-learn (K-Means, PCA)
+- Matplotlib for visualization
+
+## How to Use
