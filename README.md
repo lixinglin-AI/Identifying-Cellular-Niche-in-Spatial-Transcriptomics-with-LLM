@@ -24,3 +24,7 @@ An image processing pipeline leveraging Vision Transformers (ViT) to extract fea
 - Matplotlib for visualization
 
 ## How to Use
+1. Preprocess data using the provided scripts.
+2. Extract embeddings with Vision Transformers.
+3. Perform clustering using K-Means and dimensionality reduction via PCA.
+4. Visualize results in 2D space for meaningful insights.
