@@ -20,6 +20,7 @@ An image processing pipeline leveraging Vision Transformers (ViT) to extract fea
 ## Technologies
 - Vision Transformers (ViT)
 - PyTorch
+- umap
 - scikit-learn (K-Means, PCA)
 - Matplotlib for visualization
 
