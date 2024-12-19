@@ -1,4 +1,4 @@
-# ViT-SpotEmbeddings
+# Identifying Cellular Niches in Spatial Transcriptomics: An Investigation into the Capabilities of Large Language Models
 
 An image processing pipeline leveraging Vision Transformers (ViT) to extract feature embeddings from high-resolution tissue slide images. This project facilitates spatial clustering, dimensionality reduction, and visualization for downstream analysis, providing meaningful insights in biomedical imaging.
 
