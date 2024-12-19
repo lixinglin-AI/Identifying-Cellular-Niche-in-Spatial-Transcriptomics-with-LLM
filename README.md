@@ -1,26 +1,28 @@
-# Identifying Cellular Niches in Spatial Transcriptomics: An Investigation into the Capabilities of Large Language Models
+# LLMiniST: Advanced Spatial Niche Identification Using Large Language Models
 
-An image processing pipeline leveraging Vision Transformers (ViT) to extract feature embeddings from high-resolution tissue slide images. This project facilitates spatial clustering, dimensionality reduction, and visualization for downstream analysis, providing meaningful insights in biomedical imaging.
+LLMiniST is an innovative framework that leverages large language models (LLMs) to identify spatial niches in spatial transcriptomic datasets. By integrating gene expression, spatial context, and biological knowledge, LLMiniST sets a new standard for tissue niche identification and analysis.
 
 ## Features
-- **Data Preprocessing**:
-  - Scales and crops spot coordinates to prepare structured inputs.
-- **Feature Extraction**:
-  - Utilizes pretrained Vision Transformers to generate feature embeddings.
-- **Clustering**:
-  - Applies unsupervised K-Means clustering and PCA to uncover spatial patterns.
-- **Visualization**:
-  - Visualizes clustering results and embeddings in 2D space for interpretability.
 
-## Use Cases
-- Biomedical image analysis.
-- Spatial pattern discovery in tissue slides.
-- Unsupervised learning for high-resolution image data.
+- **Zero-Shot Spatial Contextual Analysis**: Use pre-trained LLMs to predict tissue niches without requiring dataset-specific training.
+- **Fine-Tuning Capabilities**: Implement a two-stage fine-tuning strategy for adapting LLMs to new spatial datasets, enhancing cross-subject generalizability.
+- **Spatial Context Prompt Engineering**: Transform spatial transcriptomic data into structured prompts, incorporating gene expression profiles, spatial locations, cell types, and external biological knowledge.
+- **Robust Benchmarking**: Compare LLM-based clustering with state-of-the-art non-LLM methods across datasets such as STARmap, MERFISH, and Visium.
 
-## Technologies
-- Vision Transformers (ViT)
-- PyTorch
-- umap
+## Applications
+
+- **Tissue Atlas Construction**: Delineate spatial niches to map tissue structures.
+- **Disease Insights**: Identify niche-specific markers and spatial signatures of diseases.
+- **Molecular Network Discovery**: Infer regulatory networks within identified niches.
+
+## Why LLMiniST?
+
+LLMiniST showcases the potential of large language models in spatial transcriptomics, outperforming traditional methods in accuracy, interpretability, and generalizability. By integrating prior biological knowledge with spatial data, LLMiniST advances the field of bioinformatics and spatial biology.
+
+---
+
+For more details, please refer to our [documentation](#) or contact the development team.
+
 - scikit-learn (K-Means, PCA)
 - Matplotlib for visualization
 
