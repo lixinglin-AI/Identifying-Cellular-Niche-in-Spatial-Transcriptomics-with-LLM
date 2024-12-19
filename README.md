@@ -20,14 +20,3 @@ LLMiniST is an innovative framework that leverages large language models (LLMs) 
 LLMiniST showcases the potential of large language models in spatial transcriptomics, outperforming traditional methods in accuracy, interpretability, and generalizability. By integrating prior biological knowledge with spatial data, LLMiniST advances the field of bioinformatics and spatial biology.
 
 ---
-
-For more details, please refer to our [documentation](#) or contact the development team.
-
-- scikit-learn (K-Means, PCA)
-- Matplotlib for visualization
-
-## How to Use
-1. Preprocess data using the provided scripts.
-2. Extract embeddings with Vision Transformers.
-3. Perform clustering using K-Means and dimensionality reduction via PCA.
-4. Visualize results in 2D space for meaningful insights.
