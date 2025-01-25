@@ -18,13 +18,3 @@ LLMiniST is an innovative framework that leverages large language models (LLMs) 
 ## Why LLMiniST?
 
 LLMiniST showcases the potential of large language models in spatial transcriptomics, outperforming traditional methods in accuracy, interpretability, and generalizability. By integrating prior biological knowledge with spatial data, LLMiniST advances the field of bioinformatics and spatial biology.
-
-## Documents Description
-`subject_qc_plots.pdf`: Quality Control plots for 48 BI lung samples. 
-`non_integration_analysis.pdf`: UMAP analysis without the integration. 
-`integration_analysis.pdf`: UMAP analysis with the integration.
-`scatter_plots.pdf`: Scatter plots for nFeature_RNA v.s. nCount_RNA and percentage of mt v.s. nCount_RNA.
-`violin_plots.pdf`: Violin plots for nFeature, nCount, and percentage of mt grouped by 12 subjects.
-`violin_plots_by_subjects.pdf`: Violin plots for nFeature, nCount, and percentage of mt grouped by 48 samples, colored by 12 subjects.
-`violin_plots_by_subjects_with_regions.pdf`: Violin plots for nFeature, nCount, and percentage of mt grouped by 48 samples, colored by 12 subjects, labeled on x-axis as `subject_name + 4 areas (R1, R2, R3, and R4)`. 
----
