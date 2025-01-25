@@ -18,5 +18,3 @@ LLMiniST is an innovative framework that leverages large language models (LLMs) 
 ## Why LLMiniST?
 
 LLMiniST showcases the potential of large language models in spatial transcriptomics, outperforming traditional methods in accuracy, interpretability, and generalizability. By integrating prior biological knowledge with spatial data, LLMiniST advances the field of bioinformatics and spatial biology.
-
----
