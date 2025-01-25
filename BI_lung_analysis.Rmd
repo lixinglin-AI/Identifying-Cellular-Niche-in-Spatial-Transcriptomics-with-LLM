@@ -1,0 +1,622 @@
+---
+title: "BI_lung_analysis"
+author: "Luning Yang"
+date: "2024-07-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Load the Seurat object
+#all_samples <- readRDS("all_samples_seurat.rds")
+```
+
+## Preprocessing
+```{r}
+library(Seurat)
+library(dplyr)
+library(readr)
+
+# Function to load metadata
+load_metadata <- function(metadata_path) {
+  metadata_df <- read_csv(metadata_path)
+  base_path <- "/vast/palmer/pi/xiting_yan/hw568/BI_lung_data/processed"
+  metadata_df <- metadata_df %>%
+    mutate(h5_file_path = paste0(base_path, '/', id, '/outs/')) %>%
+    select(Sample_Name = id, Subject_Name = Subject, Access_Path = h5_file_path)
+  
+  # Report the composition of each subject
+  subject_composition <- metadata_df %>%
+    group_by(Subject_Name) %>%
+    summarize(Sample_Names = list(Sample_Name))
+  
+  for (row in 1:nrow(subject_composition)) {
+    subject <- subject_composition$Subject_Name[row]
+    samples <- subject_composition$Sample_Names[[row]]
+    print(paste("The subject", subject, "consists of the samples:", paste(samples, collapse = ", ")))
+  }
+  
+  return(metadata_df)
+}
+
+# Function to read and concatenate samples
+read_and_concatenate_samples <- function(metadata_df, subject_list, metadata_dir) {
+  adata_list <- list()
+  
+  for (subject in subject_list) {
+    subject_samples <- metadata_df %>% filter(Subject_Name == subject)
+    adatas <- list()
+    duplication_count <- 0
+    
+    for (i in 1:nrow(subject_samples)) {
+      row <- subject_samples[i,]
+      batch_id <- paste(row$Subject_Name, row$Sample_Name, sep = "_")
+      sample_id <- row$Sample_Name
+      subject_id <- row$Subject_Name
+      path <- paste(row$Access_Path,"filtered_feature_bc_matrix",sep = "")
+      
+      if (dir.exists(path)) {
+        print(path)
+        sample_adata <- Read10X(path)
+        sample_seurat <- CreateSeuratObject(counts = sample_adata)
+        #sample_seurat <- RenameCells(sample_seurat, new.names = paste0(sample_id, "_", Cells(sample_seurat)))
+        sample_seurat$sample <- sample_id
+        sample_seurat$subject<- subject_id
+        sample_seurat$batch <- batch_id 
+        print(sample_seurat)
+        
+        metadata_file <- file.path(metadata_dir, paste0(row$Sample_Name, ".csv"))
+        if (file.exists(metadata_file)) {
+          sample_metadata_df <- read_csv(metadata_file)
+          if ("tumor_content" %in% colnames(sample_metadata_df)) {
+
+            # Set Barcode as the index
+            sample_metadata_df <- sample_metadata_df %>% select(Barcode, tumor_content) %>% column_to_rownames("Barcode")
+
+            # Debugging: Print the first few barcodes from both Seurat object and metadata
+            print("First few barcodes from Seurat object:")
+            print(head(Cells(sample_seurat)))
+            print("First few barcodes from metadata:")
+            print(head(rownames(sample_metadata_df)))
+            
+            # Filter metadata to include only cells present in Seurat object
+            overlapping_barcodes <- intersect(rownames(sample_metadata_df), Cells(sample_seurat))
+            if (length(overlapping_barcodes) == 0) {
+              stop("No overlapping barcodes found between Seurat object and metadata.")
+            }
+            sample_metadata_df <- sample_metadata_df[overlapping_barcodes, , drop = FALSE]
+            
+            
+            # Add tumor content metadata
+            sample_seurat <- AddMetaData(sample_seurat, metadata = sample_metadata_df["tumor_content"])
+          } else {
+            print(paste("tumor_content column not found in", metadata_file, ". Filling with zeros."))
+            sample_seurat$tumor_content <- 0
+          }
+        } else {
+          print(paste("Metadata file", metadata_file, "does not exist. Filling tumor_content with zeros."))
+          sample_seurat$tumor_content <- 0
+        }
+        
+        adatas[[sample_id]] <- sample_seurat
+      } else {
+        print(paste("Path", path, "does not exist."))
+      }
+    }
+    
+    if (length(adatas) > 0) {
+      subject_adata <- merge(adatas[[1]], y = adatas[-1], add.cell.ids = names(adatas), project = subject)
+      adata_list[[subject]] <- subject_adata
+    } else {
+      print(paste("No valid data for subject", subject))
+    }
+  }
+  
+  return(adata_list)
+}
+
+```
+
+```{r}
+# Example usage:
+metadata_path <-  "/vast/palmer/pi/xiting_yan/hw568/BI_lung_data/processed/sample_metadata.csv"
+metadata_dir <- '/vast/palmer/pi/xiting_yan/hw568/BI_lung_data/metadata'
+metadata_df <- load_metadata(metadata_path)
+subject_list <- unique(metadata_df$Subject_Name)
+
+adata_list <- read_and_concatenate_samples(metadata_df, subject_list, metadata_dir)
+
+# Merge all subjects into one Seurat object
+all_samples <- merge(adata_list[[1]], y = adata_list[-1], add.cell.ids = names(adata_list), project = "All_Samples")
+
+# Save the Seurat object
+saveRDS(all_samples, file = "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_48_samples_seurat.rds")
+
+
+```
+
+
+### Codes for analysis
+
+#### Quality Control
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Load the Seurat object
+all_samples <- readRDS("/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_48_samples_seurat.rds")
+
+# Function to create QC plots for each sample
+create_qc_plots <- function(seurat_obj, sample_name) {
+  seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+  
+  p1 <- VlnPlot(seurat_obj, features = "nFeature_RNA") + 
+    ggtitle(paste( sample_name, "nFeature_RNA Violin Plot"))
+
+  p2 <- VlnPlot(seurat_obj, features = "nCount_RNA") + 
+    ggtitle(paste("nCount_RNA Violin Plot "))
+  
+  p3 <- VlnPlot(seurat_obj, features = "percent.mt") + 
+    ggtitle(paste("percent.mtA Violin Plot"))
+  
+  p4 <- FeatureScatter(seurat_obj, feature1 = "nCount_RNA", feature2 = "percent.mt") + 
+    ggtitle(paste("Scatter Plot for", sample_name))
+  
+  p5 <- FeatureScatter(seurat_obj, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") + 
+    ggtitle(paste("Feature Scatter Plot for", sample_name))
+  
+  return(list(p1, p2, p3, p4, p5))
+}
+
+# Generate a PDF for each subject containing QC plots for their samples
+output_pdf <- "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/subject_qc_plots.pdf"
+pdf(output_pdf, width = 20, height = 16)
+
+subjects <- unique(all_samples$subject)
+
+for (uni_subject in subjects) {
+  subject_data <- subset(all_samples, subject == uni_subject)
+  print(paste("Processing subject:", uni_subject))
+  
+  plots <- list()
+  
+  for (uni_sample in unique(subject_data$sample)) {
+    sample_data <- subset(subject_data, sample == uni_sample)
+    qc_plots <- create_qc_plots(sample_data, uni_sample)
+    plots <- c(plots, qc_plots)
+    print(paste("Finished QC for sample:", uni_sample))
+  }
+  
+  # Arrange the plots in a 4-row layout and add title with larger font size
+  subject_plots <- wrap_plots(plots, ncol = 5, nrow = 4) + 
+    plot_annotation(
+      title = paste("Quality Control for", uni_subject),
+      theme = theme(
+        plot.title = element_text(size = 20, face = "bold"),
+        plot.margin = margin(1, 1, 1, 1, "cm")
+      )
+    )
+  
+  # Print the plots for the current subject
+  print(subject_plots)
+}
+
+dev.off()
+
+```
+
+### Quality Control by Subject
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Load the Seurat object
+all_samples <- readRDS("/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_48_samples_seurat.rds")
+
+# Calculate the percentage of mitochondrial genes
+all_samples[["percent.mt"]] <- PercentageFeatureSet(all_samples, pattern = "^MT-")
+
+# Create violin plots grouped by subject
+vln_nFeature <- VlnPlot(all_samples, features = "nFeature_RNA", group.by = "subject", pt.size = 0) + 
+  ggtitle("nFeature_RNA Violin Plot Grouped by Subject") + 
+  theme(plot.title = element_text(size = 20, face = "bold"))
+
+vln_nCount <- VlnPlot(all_samples, features = "nCount_RNA", group.by = "subject", pt.size = 0) + 
+  ggtitle("nCount_RNA Violin Plot Grouped by Subject") + 
+  theme(plot.title = element_text(size = 20, face = "bold"))
+
+vln_percent_mt <- VlnPlot(all_samples, features = "percent.mt", group.by = "subject", pt.size = 0) + 
+  ggtitle("percent.mt Violin Plot Grouped by Subject") + 
+  theme(plot.title = element_text(size = 20, face = "bold"))
+
+# Create scatter plots
+scatter_nCount_percent_mt <- FeatureScatter(all_samples, feature1 = "nCount_RNA", feature2 = "percent.mt",group.by = "subject") + 
+  ggtitle("nCount_RNA vs percent.mt Scatter Plot") + 
+  theme(plot.title = element_text(size = 20, face = "bold"))
+
+scatter_nCount_nFeature <- FeatureScatter(all_samples, feature1 = "nCount_RNA", feature2 = "nFeature_RNA",group.by = "subject") + 
+  ggtitle("nCount_RNA vs nFeature_RNA Scatter Plot") + 
+  theme(plot.title = element_text(size = 20, face = "bold"))
+
+# Save plots to PDF
+output_pdf <- "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/violin_plots.pdf"
+pdf(output_pdf, width = 12, height = 16)
+
+# Page 1: Violin plots in 3 rows
+vln_plots <- wrap_plots(vln_nFeature, vln_nCount, vln_percent_mt, ncol = 1) + 
+  plot_annotation(title = "Violin Plots Grouped by Subject", theme = theme(plot.title = element_text(size = 25, face = "bold")))
+print(vln_plots)
+dev.off()
+
+# Save plots to PDF
+output_pdf <- "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/scatter_plots.pdf"
+pdf(output_pdf, width = 12, height = 8)
+# Page 2: Scatter plots in 2 columns
+scatter_plots <- wrap_plots(scatter_nCount_percent_mt, scatter_nCount_nFeature, ncol = 2) + 
+  plot_annotation(title = "Scatter Plots", theme = theme(plot.title = element_text(size = 25, face = "bold")))
+print(scatter_plots)
+
+dev.off()
+
+```
+
+
+#### With integration old methods not working
+```{r}
+  all_samples <- readRDS("/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_48_samples_seurat.rds")
+  seurat_list <- SplitObject(all_samples, split.by = "sample")
+  for (i in 1:length(seurat_list)) {
+    print(paste("Processing",i))
+    seurat_list[[i]] <- NormalizeData(seurat_list[[i]])
+    seurat_list[[i]] <- FindVariableFeatures(seurat_list[[i]], selection.method = "vst", nfeatures = 2000)
+  }
+  
+  # Find integration anchors and integrate the data
+  anchors <- FindIntegrationAnchors(object.list = seurat_list, dims = 1:20)
+  print("Finish FindIntegrationAnchors")
+  integrated_seurat <- IntegrateData(anchorset = anchors, dims = 1:20)
+  print("Finish IntegrateData")
+  saveRDS(integrated_seurat, file = "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_intergration_1.rds")
+  
+  # Perform PCA
+  integrated_seurat <- ScaleData(integrated_seurat)
+  integrated_seurat <- RunPCA(integrated_seurat, npcs = 30)
+  
+  # Run UMAP and clustering
+  integrated_seurat <- FindNeighbors(integrated_seurat, dims = 1:20)
+  integrated_seurat <- FindClusters(integrated_seurat, resolution = 0.5)
+  integrated_seurat <- RunUMAP(integrated_seurat, dims = 1:20)
+  saveRDS(integrated_seurat, file = "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_intergration.rds")
+  
+```
+
+
+#### Without integration
+```{r}
+  # Normalize the data and find variable features
+  seurat_obj <- all_samples
+  seurat_obj <- NormalizeData(seurat_obj)
+  seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = 2000)
+  
+  # Perform PCA
+  seurat_obj <- ScaleData(seurat_obj)
+  seurat_obj <- RunPCA(seurat_obj, npcs = 30)
+  
+  # Run UMAP and clustering
+  seurat_obj <- FindNeighbors(seurat_obj, dims = 1:20)
+  seurat_obj <- FindClusters(seurat_obj, resolution = 0.5)
+  seurat_obj <- RunUMAP(seurat_obj, dims = 1:20)
+  saveRDS(seurat_obj, file = "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_non_intergration.rds")
+
+```
+
+```{r}
+install.packages("devtools")
+library(devtools)
+install_github("erichare/discreteRV")
+library(discreteRV)
+install.packages("scales")
+library(scales)
+```
+
+## Plotting Testing
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales) # For the hue_pal function
+
+# Load the Seurat object
+output_pdf <- "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/non_integration_analysis.pdf"
+
+# Generate UMAP plots and save to PDF
+pdf(output_pdf, width = 16, height = 25)
+subjects <- unique(seurat_obj$subject)
+
+# Define a fixed color palette for clusters
+cluster_colors <- hue_pal()(length(unique(seurat_obj$seurat_clusters)))
+names(cluster_colors) <- levels(seurat_obj$seurat_clusters)
+
+for (uni_subject in subjects) {
+  subject_data <- subset(seurat_obj, subject == uni_subject)
+  print(paste("Begin to process for Subject", uni_subject, sep = " "))
+  
+  plots <- list()
+  for (uni_sample in unique(subject_data$sample)) {
+    sample_data <- subset(subject_data, sample == uni_sample)
+    print(paste("Finished subset for", uni_sample, sep = " "))
+    p1 <- DimPlot(sample_data, reduction = "umap", group.by = "seurat_clusters", label = TRUE, pt.size = 0.5) + 
+      scale_color_manual(values = cluster_colors) +
+      ggtitle(paste("Cluster", uni_sample))
+    p2 <- FeaturePlot(sample_data, features = "tumor_content", cols = c("blue", "red"), pt.size = 0.5) +
+      ggtitle(paste("Tumor Content", uni_sample))
+    plots <- append(plots, list(p1, p2))
+    print("OK")
+  }
+  
+  # Arrange the plots in a 2x4 grid and add title with larger font size
+  subject_plots <- wrap_plots(plots, ncol = 2, nrow = 4) + 
+    plot_annotation(
+      title = paste("UMAP for", uni_subject),
+      theme = theme(
+        plot.title = element_text(size = 20, face = "bold"),
+        plot.margin = margin(1, 1, 1, 1, "cm")
+      )
+    )
+  
+  # Print the plots for the current subject
+  print(subject_plots)
+}
+dev.off()
+
+```
+## Integration
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(harmony)
+library(patchwork)
+
+# Load the Seurat object
+all_samples <- readRDS("/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_48_samples_seurat.rds")
+
+output_pdf <- "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/integration_analysis.pdf"
+
+# Normalize the data and find variable features
+seurat_obj <- all_samples
+seurat_obj <- NormalizeData(seurat_obj)
+seurat_obj <- FindVariableFeatures(seurat_obj, selection.method = "vst", nfeatures = 2000)
+
+# Perform PCA
+seurat_obj <- ScaleData(seurat_obj)
+seurat_obj <- RunPCA(seurat_obj, npcs = 30)
+
+# Run Harmony integration
+seurat_obj <- RunHarmony(seurat_obj, group.by.vars = "sample", reduction = "pca", assay.use = "RNA")
+
+# Run UMAP and clustering
+seurat_obj <- FindNeighbors(seurat_obj, reduction = "harmony", dims = 1:20)
+seurat_obj <- FindClusters(seurat_obj, resolution = 0.5)
+seurat_obj <- RunUMAP(seurat_obj, reduction = "harmony", dims = 1:20)
+saveRDS(seurat_obj, file = "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_after_intergration.rds")
+```
+
+
+```{r}
+# Generate UMAP plots and save to PDF
+pdf(output_pdf, width = 16, height = 25)
+subjects <- unique(seurat_obj$subject)
+
+# Define a fixed color palette for clusters
+cluster_colors <- hue_pal()(length(unique(seurat_obj$seurat_clusters)))
+names(cluster_colors) <- levels(seurat_obj$seurat_clusters)
+
+for (uni_subject in subjects) {
+  subject_data <- subset(seurat_obj, subject == uni_subject)
+  print(paste("Begin to process for Subject", uni_subject, sep = " "))
+  
+  plots <- list()
+  for (uni_sample in unique(subject_data$sample)) {
+    sample_data <- subset(subject_data, sample == uni_sample)
+    print(paste("Finished subset for", uni_sample, sep = " "))
+    p1 <- DimPlot(sample_data, reduction = "umap", group.by = "seurat_clusters", label = TRUE, pt.size = 0.5) + 
+      scale_color_manual(values = cluster_colors) +
+      ggtitle(paste("Cluster", uni_sample))
+    p2 <- FeaturePlot(sample_data, features = "tumor_content", cols = c("blue", "red"), pt.size = 0.5) +
+      ggtitle(paste("Tumor Content", uni_sample))
+    plots <- append(plots, list(p1, p2))
+    print("OK")
+  }
+  
+  # Arrange the plots in a 2x4 grid and add title with larger font size
+  subject_plots <- wrap_plots(plots, ncol = 2, nrow = 4) + 
+    plot_annotation(
+      title = paste("UMAP for", uni_subject),
+      theme = theme(
+        plot.title = element_text(size = 20, face = "bold"),
+        plot.margin = margin(1, 1, 1, 1, "cm")
+      )
+    )
+  
+  # Print the plots for the current subject
+  print(subject_plots)
+}
+dev.off()
+
+```
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Load the Seurat objects
+integrated_obj <- readRDS("/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_after_integration.rds")
+non_integrated_obj <- readRDS("/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_non_integration.rds")
+
+# Function to create UMAP plots colored by subject
+plot_umap_by_subject <- function(seurat_obj, output_file, title) {
+  pdf(output_file, width = 10, height = 8)
+  umap_plot <- DimPlot(seurat_obj, reduction = "umap", group.by = "subject") + 
+    ggtitle(title) +
+    theme(
+      plot.title = element_text(size = 20, face = "bold"),
+      plot.margin = margin(1, 1, 1, 1, "cm")
+    )
+  print(umap_plot)
+  dev.off()
+}
+
+# Create UMAP plots for integrated and non-integrated data
+plot_umap_by_subject(integrated_obj, "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_umap_after_integration.pdf", "UMAP After Integration")
+plot_umap_by_subject(non_integrated_obj, "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_umap_non_integration.pdf", "UMAP Without Integration")
+
+
+```
+
+
+```{r}
+# Function to create UMAP plots colored by a specific feature
+plot_umap_by_feature <- function(seurat_obj, feature, output_file, title) {
+  pdf(output_file, width = 10, height = 8)
+  umap_plot <- FeaturePlot(seurat_obj, features = feature, cols = c("blue", "red"), pt.size = 0.5) + 
+    ggtitle(title) +
+    theme(
+      plot.title = element_text(size = 20, face = "bold"),
+      plot.margin = margin(1, 1, 1, 1, "cm")
+    )
+  print(umap_plot)
+  dev.off()
+}
+
+# Create UMAP plots for tumor content in integrated and non-integrated data
+plot_umap_by_feature(integrated_obj, "tumor_content", "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_tumor_content_after_integration.pdf", "Tumor Content After Integration")
+plot_umap_by_feature(non_integrated_obj, "tumor_content", "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/BI_lung_tumor_content_non_integration.pdf", "Tumor Content Without Integration")
+```
+
+## Find Marker Genes
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(ComplexHeatmap)
+
+# Assume seurat_obj is already loaded and contains clustering results
+
+# Function to find marker genes for each cluster
+find_marker_genes <- function(seurat_obj) {
+  # Find all markers using raw RNA counts
+  seurat_obj <- NormalizeData(seurat_obj, normalization.method = "LogNormalize", assay = "RNA")
+  seurat_obj <- JoinLayers(seurat_obj)
+  all_markers <- FindAllMarkers(seurat_obj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+  print(all_markers)
+  
+  # Print top 10 marker genes for each cluster
+  top10_markers <- all_markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10, wt = avg_log2FC)
+  
+  print(top10_markers %>% group_by(cluster) %>% summarise(genes = paste(gene, collapse = ", ")))
+  
+  return(top10_markers)
+}
+
+# Function to create bubble plot
+create_bubble_plot <- function(top10_markers, seurat_obj, output_file) {
+  bubble_plot <- DotPlot(seurat_obj, features = unique(top10_markers$gene)) +
+    scale_color_gradient(low = "blue", high = "red") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+  pdf(output_file, width = 10, height = 8)
+  print(bubble_plot)
+  dev.off()
+}
+
+# Function to create heatmap
+create_heatmap <- function(top10_markers, seurat_obj, output_file) {
+  heatmap_data <- seurat_obj@assays$RNA@data[unique(top10_markers$gene), ]
+  heatmap_data <- t(scale(t(heatmap_data))) # Scale data
+  top10_genes <- unique(top10_markers$gene)
+  
+  heatmap <- Heatmap(heatmap_data[top10_genes, ], 
+                     name = "Expression", 
+                     show_row_names = TRUE,
+                     show_column_names = FALSE,
+                     cluster_rows = FALSE,
+                     cluster_columns = TRUE)
+  
+  pdf(output_file, width = 10, height = 8)
+  draw(heatmap)
+  dev.off()
+}
+
+# Function to process each subject and generate plots
+process_subject <- function(seurat_obj, subject) {
+  subject_data <- subset(seurat_obj, subject == subject)
+  print(paste("Processing subject:", subject))
+  
+  # Find marker genes for the subject
+  top10_markers <- find_marker_genes(subject_data)
+  
+  # Create output directory if it doesn't exist
+  output_dir <- file.path("subject_analysis", subject)
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  # Generate bubble plot
+  bubble_plot_file <- file.path(output_dir, paste0(subject, "_bubble_plot.pdf"))
+  create_bubble_plot(top10_markers, subject_data, bubble_plot_file)
+  
+  # Generate heatmap
+  heatmap_file <- file.path(output_dir, paste0(subject, "_heatmap.pdf"))
+  create_heatmap(top10_markers, subject_data, heatmap_file)
+}
+
+```
+
+```{r}
+# Generate a combined PDF for all subjects
+output_pdf <- "/vast/palmer/pi/xiting_yan/ly349/BL_lung_analysis/R_analysis_BI/subject_analysis/combined_analysis.pdf"
+pdf(output_pdf, width = 10, height = 16)
+
+obj <-integrated_obj
+subjects <- unique(obj$subject)
+
+for (subject in subjects) {
+  print(paste("Start to process for", subject, sep = ""))
+  process_subject(obj, subject)
+  
+  # Print bubble plot and heatmap for each subject on the same page
+  bubble_plot_file <- file.path("subject_analysis", subject, paste0(subject, "_bubble_plot.pdf"))
+  heatmap_file <- file.path("subject_analysis", subject, paste0(subject, "_heatmap.pdf"))
+  
+  bubble_plot <- ggplotGrob(ggplotify::as.ggplot(cowplot::ggdraw() + cowplot::draw_image(bubble_plot_file)))
+  heatmap <- ggplotGrob(ggplotify::as.ggplot(cowplot::ggdraw() + cowplot::draw_image(heatmap_file)))
+  
+  grid.arrange(bubble_plot, heatmap, ncol = 1, top = textGrob(subject, gp = gpar(fontsize = 20, fontface = "bold")))
+  print("Finished")
+}
+dev.off()
+
+```
